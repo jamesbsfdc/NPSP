@@ -62,6 +62,8 @@ public with sharing class UTIL_Query {
     /** @description Indicates if fls and user profile permissions should be enforced */
     private Boolean isSecurityEnforced = false;
 
+    private Boolean forUpdate = false;
+
     /*********************************************************************************************************
     * @description The constructor
     */
@@ -179,6 +181,11 @@ public with sharing class UTIL_Query {
         return this;
     }
 
+    public UTIL_Query withForUpdate() {
+        this.forUpdate = true;
+        return this;
+    }
+
     /*********************************************************************************************************
     * @description Validates and builds a SOQL
     * @return String The SOQL
@@ -194,14 +201,15 @@ public with sharing class UTIL_Query {
         }
 
         return String.format(
-            'SELECT {0} FROM {1}{2}{3}{4}{5}',
+            'SELECT {0} FROM {1}{2}{3}{4}{5}{6}',
             new String[] {
                 String.join(uniqueSelectFields, ', '),
                 entity,
                 buildWhereClause(),
                 buildSecurityEnforcedClause(),
                 buildOrderByClause(),
-                buildLimitClause()
+                buildLimitClause(),
+                buildForUpdateClause()
             }
         ).trim();
     }
@@ -241,6 +249,13 @@ public with sharing class UTIL_Query {
         }
 
         return fieldName;
+    }
+
+    private String buildForUpdateClause() {
+        if(this.forUpdate) {
+            return ' FOR UPDATE';
+        }
+        return '';
     }
 
     /*********************************************************************************************************

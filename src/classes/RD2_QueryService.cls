@@ -129,6 +129,7 @@ public inherited sharing class RD2_QueryService {
             .withFrom(npe03__Recurring_Donation__c.SObjectType)
             .withSelectFields(queryFields)
             .withWhere('Id IN :rdIds')
+            .withForUpdate()
             .build();
 
         return Database.query(soql);
