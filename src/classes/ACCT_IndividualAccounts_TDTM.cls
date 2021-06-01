@@ -119,14 +119,19 @@ public class ACCT_IndividualAccounts_TDTM extends TDTM_Runnable {
     public override DmlWrapper run(List<SObject> newSObjects, List<SObject> oldSObjects,
         TDTM_Runnable.Action triggerAction, Schema.DescribeSObjectResult objResult) {
 
+        // Reset this flag to false for each call to run(), since some NPSP tests
+        // insert Contacts in multiple DML statements.  This flag functions then as
+        // protection against recursion for each call to the method.
+        isNewHouseholdAccountInsert = false;
+
         this.contacts = newSObjects;
         this.oldContactById = oldSObjects == null ? null : new Map<Id, Contact>((List<Contact>) oldSObjects);
         this.triggerAction = triggerAction;
         this.dmlWrapper = new DmlWrapper();
         contactsSettings = UTIL_CustomSettingsFacade.getContactsSettings();
 
-        if (triggerAction == TDTM_Runnable.Action.BeforeInsert ||
-                triggerAction == TDTM_Runnable.Action.AfterInsert) {
+        if (triggerAction == TDTM_Runnable.Action.BeforeInsert
+                || triggerAction == TDTM_Runnable.Action.AfterInsert) {
             isNewContactInsert = true;
         }
 
@@ -137,6 +142,7 @@ public class ACCT_IndividualAccounts_TDTM extends TDTM_Runnable {
             handleAfter();
 
         } else if (triggerAction == TDTM_Runnable.Action.AfterDelete) {
+            isNewHouseholdAccountInsert = false;
             processAccountsAfterDelete(oldSObjects);
         }
 
@@ -178,11 +184,12 @@ public class ACCT_IndividualAccounts_TDTM extends TDTM_Runnable {
         contacts = Database.query(buildContactSoql());
 
         if (triggerAction == TDTM_Runnable.Action.AfterInsert || triggerAction == TDTM_Runnable.Action.AfterUndelete) {
-            processAccountsAfterInsert();
+            processHouseholdAccountsAfterContactInsert();
         }
 
         if (triggerAction == TDTM_Runnable.Action.AfterUpdate) {
-            processAccountsAfterUpdate();
+            isNewHouseholdAccountInsert = false;
+            processHouseholdAccountsAfterContactUpdate();
         }
 
     }
@@ -260,7 +267,7 @@ public class ACCT_IndividualAccounts_TDTM extends TDTM_Runnable {
     /**
      * @description Sets the primary contact on the account when needed and renames the household.
      */
-    private void processAccountsAfterInsert() {
+    private void processHouseholdAccountsAfterContactInsert() {
         Map<Id, Id> primaryContactByAccountId = new Map<Id, Id>();
         List<Id> householdIdsToRename = new List<Id>();
 
@@ -273,10 +280,12 @@ public class ACCT_IndividualAccounts_TDTM extends TDTM_Runnable {
                 primaryContactByAccountId.put(contactRecord.AccountId, contactRecord.Id);
             }
 
-            if ((!isNewContactInsertOperation() ||
-                    isNewContactInsertOperation() && isBeingAddedToAHousehold(contactRecord)) &&
-                    isHouseholdMember(contactRecord)) {
+            if ((!isNewContactInsertOperation()
+                    || isNewContactInsertOperation()
+                    && isBeingAddedToAHousehold(contactRecord))
+                    && isHouseholdMember(contactRecord)) {
                 householdIdsToRename.add(contactRecord.AccountId);
+
             }
         }
 
@@ -303,7 +312,7 @@ public class ACCT_IndividualAccounts_TDTM extends TDTM_Runnable {
      * move opportunities related to contacts changing accounts, update household accounts, rename household accounts
      * update account owners based on the change in contact owner
      */
-    private void processAccountsAfterUpdate() {
+    private void processHouseholdAccountsAfterContactUpdate() {
         List<Id> householdIdsToUpdate = new List<Id>();
         List<Id> householdIdsToRename = new List<Id>();
         List<Contact> oneToOneContactsToUpdate = new List<Contact>();
@@ -600,7 +609,6 @@ public class ACCT_IndividualAccounts_TDTM extends TDTM_Runnable {
                     }
                 }
             }
-            isNewHouseholdAccountInsert = false;
         }
 
         // now update each contact's accountId
