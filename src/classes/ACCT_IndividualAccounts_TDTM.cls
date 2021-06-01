@@ -35,6 +35,9 @@
 */
 public class ACCT_IndividualAccounts_TDTM extends TDTM_Runnable {
 
+    private static Boolean isNewContactInsert = false;
+    public static Boolean isNewHouseholdAccountInsert = false;
+
     @TestVisible
     private OrgConfig orgConfig {
         get {
@@ -121,6 +124,11 @@ public class ACCT_IndividualAccounts_TDTM extends TDTM_Runnable {
         this.triggerAction = triggerAction;
         this.dmlWrapper = new DmlWrapper();
         contactsSettings = UTIL_CustomSettingsFacade.getContactsSettings();
+
+        if (triggerAction == TDTM_Runnable.Action.BeforeInsert ||
+                triggerAction == TDTM_Runnable.Action.AfterInsert) {
+            isNewContactInsert = true;
+        }
 
         if (triggerAction == TDTM_Runnable.Action.BeforeInsert || triggerAction == TDTM_Runnable.Action.BeforeUpdate) {
             handleBefore();
@@ -265,13 +273,29 @@ public class ACCT_IndividualAccounts_TDTM extends TDTM_Runnable {
                 primaryContactByAccountId.put(contactRecord.AccountId, contactRecord.Id);
             }
 
-            if (isHouseholdMember(contactRecord)) {
+            if ((!isNewContactInsertOperation() ||
+                    isNewContactInsertOperation() && isBeingAddedToAHousehold(contactRecord)) &&
+                    isHouseholdMember(contactRecord)) {
                 householdIdsToRename.add(contactRecord.AccountId);
             }
         }
 
         updatePrimaryContactOnAccount(primaryContactByAccountId);
-        householdNamingService.renameHouseholdAccounts(householdIdsToRename);
+        if (!householdIdsToRename.isEmpty()) {
+            householdNamingService.renameHouseholdAccounts(householdIdsToRename);
+        }
+    }
+
+    private Boolean isBeingAddedToAHousehold(Contact contactRecord) {
+        return contactRecord.AccountId != null;
+    }
+
+    /**
+     * @description Tells whether a new Contact is being inserted - either by this class or by
+     * the NPSP Trigger Handler that inserts Household objects.
+     */
+    private Boolean isNewContactInsertOperation() {
+        return isNewContactInsert || HH_Households_TDTM.isNewContactInsert;
     }
 
     /**
@@ -534,7 +558,6 @@ public class ACCT_IndividualAccounts_TDTM extends TDTM_Runnable {
         }
 
         List<Account> accountInserts = new List<Account>();
-        Id individualRecordTypeId = Accounts.rtIdForNewAccount();
 
         for (Contact contactRecord : contactsWithoutAccounts) {
             // if we found an Account already connected to this Contact, connect the Contact to that Account if it
@@ -546,39 +569,10 @@ public class ACCT_IndividualAccounts_TDTM extends TDTM_Runnable {
                 // if a user has blanked out the Account for a Contact, this will put it right back
                 contactRecord.AccountId = accountRecord.Id;
             } else {
-                // construct the individul account for the Contact
-                accountRecord = new Account();
-
-                // construct the Account name
-                accountRecord.Name = CAO_Constants.isHHAccountModel() ? strNameHHAccountForContact(contactRecord) : strNameOne2OneAccountForContact(contactRecord);
-
-                // connect the Account to the Contact for 1:1 and HHAccount
-                if (contactRecord.Id != null) {
-                    accountRecord.npe01__One2OneContact__c = contactRecord.Id;
-                }
-
-                accountRecord.Phone = contactRecord.Phone;
-                accountRecord.Fax = contactRecord.Fax;
-                accountRecord.OwnerId = contactRecord.OwnerId;
-
-                if (UserInfo.isMultiCurrencyOrganization()) {
-                    accountRecord.put('CurrencyIsoCode', (String) contactRecord.get('CurrencyIsoCode'));
-                }
-
-                // Always copy the Contact's Mailing & Others address to the new Account's
-                // Billing & Shipping address.
-                if (contactRecord.is_Address_Override__c != true) {
-                    addressService.copyAddressStdSObj(contactRecord, 'Mailing', accountRecord, 'Billing');
-                    addressService.copyAddressStdSObj(contactRecord, 'Other', accountRecord, 'Shipping');
-                }
-
-                accountRecord.npe01__SYSTEM_AccountType__c = CAO_Constants.isHHAccountModel() ? CAO_Constants.HH_ACCOUNT_TYPE : CAO_Constants.ONE_TO_ONE_ORGANIZATION_TYPE;
-                if (individualRecordTypeId != null) {
-                    accountRecord.put('RecordTypeID', individualRecordTypeId);
-                }
-                accountRecord.Type = CAO_Constants.isHHAccountModel() ? CAO_Constants.HH_TYPE : '';
-                accountRecord.npe01__SYSTEMIsIndividual__c = true;
-                accountInserts.add(accountRecord);
+                // construct the individual account for the Contact
+                NPSP_HouseholdAccount npspHouseholdAccount =
+                        new NPSP_HouseholdAccount(contactRecord);
+                accountInserts.add(npspHouseholdAccount.getRecord());
                 contacts.add(contactRecord);
             }
         }
@@ -591,16 +585,22 @@ public class ACCT_IndividualAccounts_TDTM extends TDTM_Runnable {
         // because we need to get the new AccountID's into the Contacts.
 
         // identify the specific records that had the problem, and don't fail the whole batch
-        List<Database.SaveResult> insertResults = UTIL_DMLService.insertRecords(accountInserts, false);
-        for (Integer index = 0; index < insertResults.size(); index++) {
-            Database.SaveResult insertResult = insertResults[index];
-            if (!insertResult.isSuccess()) {
-                for (Database.Error err : insertResult.getErrors()) {
-                    accountInserts[index].addError(err.getMessage());
-                    Contact contactRecord = contacts[index];
-                    contactRecord.addError(String.format(System.Label.conFailedAccountCreate, new String[]{contactRecord.FirstName, contactRecord.LastName, err.getMessage()}));
+        if (!accountInserts.isEmpty()) {
+            isNewHouseholdAccountInsert = true;
+            List<Database.SaveResult> insertResults = UTIL_DMLService.insertRecords(accountInserts, false);
+            for (Integer index = 0; index < insertResults.size(); index++) {
+                Database.SaveResult insertResult = insertResults[index];
+                if (!insertResult.isSuccess()) {
+                    for (Database.Error err : insertResult.getErrors()) {
+                        accountInserts[index].addError(err.getMessage());
+                        Contact contactRecord = contacts[index];
+                        contactRecord.addError(String.format(System.Label.conFailedAccountCreate, new String[]{
+                                contactRecord.FirstName, contactRecord.LastName, err.getMessage()
+                        }));
+                    }
                 }
             }
+            isNewHouseholdAccountInsert = false;
         }
 
         // now update each contact's accountId

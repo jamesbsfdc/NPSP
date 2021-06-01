@@ -145,10 +145,16 @@ public without sharing class HouseholdNamingService {
     }
 
     private Boolean numberOfHouseholdMembersIsIncorrect(SObject household, List<Contact> householdMembers) {
+        Integer numberOfMembersStoredOnTheHousehold =
+                Integer.valueOf(household.get('Number_of_Household_Members__c'));
         if (householdMembers != null) {
-            return household.get('Number_of_Household_Members__c') != householdMembers.size();
+            return numberOfMembersStoredOnTheHousehold != householdMembers.size();
         } else {
-            return false;
+            if (numberOfMembersStoredOnTheHousehold > 0) {
+                return true;
+            } else {
+                return false;
+            }
         }
     }
 
@@ -227,10 +233,10 @@ public without sharing class HouseholdNamingService {
     //Todo: move to Household Settings?
     public Set<String> getHouseholdNamingContactFields() {
         if (!settings.isAdvancedHouseholdNaming()
-                || householdNamingImpl.setHouseholdNameFieldsOnContact() == null) {
+                || householdNamingImpl.householdNamingFields() == null) {
             return new Set<String>();
         } else {
-            return householdNamingImpl.setHouseholdNameFieldsOnContact();
+            return householdNamingImpl.householdNamingFields();
         }
     }
 
@@ -353,12 +359,16 @@ public without sharing class HouseholdNamingService {
     }
 
     /*******************************************************************************************************
-    * @description for the list of Household or Account Ids, update their Household Names
+    * @description for the list of Household or Account Ids, update their Household Names.
+    * This operation does not need to run for new Contact Inserts that are getting new
+    * Households, since the name is already set correctly in that flow.
     * @param accountIds the list of Household or Account Ids that need updating.
-    * @return void
     */
     public void renameHouseholdAccounts(List<Id> accountIds) {
-        renameHHAccounts(accountIds);
+        if (!ACCT_IndividualAccounts_TDTM.isNewHouseholdAccountInsert &&
+                !HH_Households_TDTM.isNewContactInsert) {
+            renameHHAccounts(accountIds);
+        }
     }
 
     /*******************************************************************************************************

@@ -65,8 +65,33 @@ public inherited sharing class Addresses extends fflib_SObjects {
     }
 
     public void onAfterInsert() {
+        Map<Id, Address__c> defaultAndSeasonalAddressesByHouseholdAccountId =
+                defaultAndSeasonalAddressesByHouseholdAccountId();
+        List<Address__c> addresses = [
+                SELECT Default_Address__c, Household_Account__c
+                FROM Address__c
+                WHERE Household_Account__c
+                        IN :defaultAndSeasonalAddressesByHouseholdAccountId.keySet()
+        ];
+        Set<Id> accountsWithExistingDefaultAddresses = new Set<Id>();
+        for (Address__c address : addresses) {
+            if (address.Default_Address__c) {
+                accountsWithExistingDefaultAddresses.add(address.Household_Account__c);
+            }
+
+        }
+        for (Id acctId : defaultAndSeasonalAddressesByHouseholdAccountId.keySet()) {
+            if (!accountsWithExistingDefaultAddresses.contains(acctId)) {
+                defaultAndSeasonalAddressesByHouseholdAccountId.remove(acctId);
+            }
+        }
+
+        //Only run if Acct has existing defaults Addresses and needs evaluation
         if (defaultAndSeasonalAddressesByHouseholdAccountId().size() > 0) {
-            refreshCurrentHHAddress(defaultAndSeasonalAddressesByHouseholdAccountId(), dmlWrapperLocal, false);
+            refreshCurrentHHAddress(
+                    defaultAndSeasonalAddressesByHouseholdAccountId,
+                    dmlWrapperLocal,
+                    false);
         }
 
         // we must process dmlWrapperLocal ourselves, so we can extract out the appropriate
