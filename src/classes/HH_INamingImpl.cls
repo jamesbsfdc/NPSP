@@ -107,13 +107,13 @@ public with sharing class HH_INamingImpl implements HH_INaming {
     * @description our cached copy of the Household Naming Settings
     */
     private Household_Naming_Settings__c hns {
-    	get {
-    		if (hns == null) {
+        get {
+            if (hns == null) {
                 hns = UTIL_CustomSettingsFacade.getHouseholdNamingSettings();
             }
-    		return hns;
-    	}
-    	set;
+            return hns;
+        }
+        set;
     }
 
     private static String chLToken = '{!';
